@@ -185,7 +185,7 @@ async function resolveRequest(requestId, record, decision, customText) {
   }
 
   const groupLine = decision === 'approved'
-    ? `✅ ${record.employee}'s ${record.type} leave (${record.fromFmt} – ${record.toFmt}) — Approved\n\nAttendance: ${ATTENDANCE_TAG}`
+    ? `✅ ${record.employee}'s ${record.type} leave (${record.fromFmt} – ${record.toFmt}) — Approved\n\n${ATTENDANCE_TAG}, please adjust schedule accordingly. Thank you!`
     : decision === 'declined'
       ? `❌ ${record.employee}'s ${record.type} leave (${record.fromFmt} – ${record.toFmt}) — Not approved`
       : `📋 Update posted on ${record.employee}'s ${record.type} leave request (${record.fromFmt} – ${record.toFmt})`;
