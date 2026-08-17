@@ -1,0 +1,16 @@
+{
+  "name": "psulit-leave-backend",
+  "version": "1.0.0",
+  "description": "Backend for Psulit Leave Request Slip — posts to Telegram and routes Jen's approval replies to employees",
+  "main": "server.js",
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.22.2",
+    "multer": "^2.2.0"
+  }
+}
