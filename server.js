@@ -76,7 +76,8 @@ app.post('/submit-leave', upload.single('photo'), async (req, res) => {
 
     const typeEmoji = { Sick: '🤒', Vacation: '🌴', 'Emergency/Other': '⚠️', 'Change Off': '🔄', 'Offset Request': '🔁' }[type] || '📋';
     const durationText = (type === 'Offset Request' && hoursRequested) ? ` — ${escapeHtml(hoursRequested)}h` : '';
-    const caption = `${typeEmoji} <b>${escapeHtml(type)} Leave Request${durationText}</b> — ${escapeHtml(employee)} (${escapeHtml(branch)})`;
+    const labelText = type === 'Offset Request' ? `Offset Request${durationText}` : `${escapeHtml(type)} Leave Request`;
+    const caption = `${typeEmoji} <b>${labelText}</b> — ${escapeHtml(employee)} (${escapeHtml(branch)})`;
 
     const requestId = crypto.randomUUID();
     const approveButtons = {
@@ -148,7 +149,10 @@ app.post('/telegram-webhook', async (req, res) => {
       // Update her message: remove buttons, show the outcome in the caption
       const decisionLine = decision === 'approved' ? '\n\n✅ <b>APPROVED</b>' : '\n\n❌ <b>DECLINED</b>';
       const typeEmoji = { Sick: '🤒', Vacation: '🌴', 'Emergency/Other': '⚠️', 'Change Off': '🔄', 'Offset Request': '🔁' }[record.type] || '📋';
-      const baseCaption = `${typeEmoji} <b>${escapeHtml(record.type)} Leave Request</b> — ${escapeHtml(record.employee)} (${escapeHtml(record.branch)})`;
+      const baseLabelText = record.type === 'Offset Request'
+        ? `Offset Request${record.hoursRequested ? ` — ${escapeHtml(record.hoursRequested)}h` : ''}`
+        : `${escapeHtml(record.type)} Leave Request`;
+      const baseCaption = `${typeEmoji} <b>${baseLabelText}</b> — ${escapeHtml(record.employee)} (${escapeHtml(record.branch)})`;
       await editCaption(JEN_CHAT_ID, cq.message.message_id, baseCaption + decisionLine);
 
       return;
@@ -180,17 +184,19 @@ app.post('/telegram-webhook', async (req, res) => {
 
 // ---- Shared resolution logic for both button taps and typed replies ----
 async function resolveRequest(requestId, record, decision, customText) {
-  const whenPhrase = (record.type === 'Offset Request' && record.hoursRequested)
+  const isOffsetReq = record.type === 'Offset Request';
+  const whenPhrase = (isOffsetReq && record.hoursRequested)
     ? `on ${escapeHtml(record.fromFmt)} (${escapeHtml(record.hoursRequested)} hours)`
     : `from ${escapeHtml(record.fromFmt)} to ${escapeHtml(record.toFmt)}`;
+  const typeLabel = isOffsetReq ? 'Offset Request' : `${escapeHtml(record.type)} leave`;
 
   let memo;
   if (decision === 'approved') {
-    memo = `✅ <b>APPROVED — Leave Request</b>\n\n${escapeHtml(record.employee)}, your ${escapeHtml(record.type)} leave ${whenPhrase} has been approved.\n\nPlease coordinate handover with your shift lead before your leave starts.\n\n— Jen, Psulit Money Changer`;
+    memo = `✅ <b>APPROVED — Leave Request</b>\n\n${escapeHtml(record.employee)}, your ${typeLabel} ${whenPhrase} has been approved.\n\nPlease coordinate handover with your shift lead before your leave starts.\n\n— Jen, Psulit Money Changer`;
   } else if (decision === 'declined') {
-    memo = `❌ <b>NOT APPROVED — Leave Request</b>\n\n${escapeHtml(record.employee)}, your ${escapeHtml(record.type)} leave request ${whenPhrase} was not approved at this time.\n\nMessage Jen directly if you'd like to discuss.\n\n— Jen, Psulit Money Changer`;
+    memo = `❌ <b>NOT APPROVED — Leave Request</b>\n\n${escapeHtml(record.employee)}, your ${typeLabel} request ${whenPhrase} was not approved at this time.\n\nMessage Jen directly if you'd like to discuss.\n\n— Jen, Psulit Money Changer`;
   } else {
-    memo = `📋 <b>Update on your Leave Request</b>\n\n${escapeHtml(record.employee)}, regarding your ${escapeHtml(record.type)} leave (${whenPhrase}):\n\n${escapeHtml(customText || '')}\n\n— Jen, Psulit Money Changer`;
+    memo = `📋 <b>Update on your Leave Request</b>\n\n${escapeHtml(record.employee)}, regarding your ${typeLabel} (${whenPhrase}):\n\n${escapeHtml(customText || '')}\n\n— Jen, Psulit Money Changer`;
   }
 
   if (decision === 'approved') {
