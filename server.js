@@ -69,13 +69,14 @@ app.get('/', (req, res) => {
 // reason, contact, slipNo, dayCount
 app.post('/submit-leave', upload.single('photo'), async (req, res) => {
   try {
-    const { employee, coverBy, branch, type, fromFmt, toFmt, dayCount, reason, contact, slipNo } = req.body;
+    const { employee, coverBy, branch, type, fromFmt, toFmt, dayCount, hoursRequested, reason, contact, slipNo } = req.body;
 
     if (!req.file) return res.status(400).json({ ok: false, error: 'Missing photo' });
     if (!employee || !branch || !type) return res.status(400).json({ ok: false, error: 'Missing required fields' });
 
     const typeEmoji = { Sick: '🤒', Vacation: '🌴', 'Emergency/Other': '⚠️', 'Change Off': '🔄', 'Offset Request': '🔁' }[type] || '📋';
-    const caption = `${typeEmoji} <b>${escapeHtml(type)} Leave Request</b> — ${escapeHtml(employee)} (${escapeHtml(branch)})`;
+    const durationText = (type === 'Offset Request' && hoursRequested) ? ` — ${escapeHtml(hoursRequested)}h` : '';
+    const caption = `${typeEmoji} <b>${escapeHtml(type)} Leave Request${durationText}</b> — ${escapeHtml(employee)} (${escapeHtml(branch)})`;
 
     const requestId = crypto.randomUUID();
     const approveButtons = {
@@ -101,7 +102,7 @@ app.post('/submit-leave', upload.single('photo'), async (req, res) => {
     const coverByChatId = EMPLOYEE_CHAT_IDS[coverBy] || null;
 
     const record = {
-      employee, coverBy, coverByChatId, branch, type, fromFmt, toFmt, dayCount, reason, contact, slipNo,
+      employee, coverBy, coverByChatId, branch, type, fromFmt, toFmt, dayCount, hoursRequested, reason, contact, slipNo,
       employeeChatId,
       jenMessageId,
       createdAt: Date.now(),
@@ -179,13 +180,17 @@ app.post('/telegram-webhook', async (req, res) => {
 
 // ---- Shared resolution logic for both button taps and typed replies ----
 async function resolveRequest(requestId, record, decision, customText) {
+  const whenPhrase = (record.type === 'Offset Request' && record.hoursRequested)
+    ? `on ${escapeHtml(record.fromFmt)} (${escapeHtml(record.hoursRequested)} hours)`
+    : `from ${escapeHtml(record.fromFmt)} to ${escapeHtml(record.toFmt)}`;
+
   let memo;
   if (decision === 'approved') {
-    memo = `✅ <b>APPROVED — Leave Request</b>\n\n${escapeHtml(record.employee)}, your ${escapeHtml(record.type)} leave from ${escapeHtml(record.fromFmt)} to ${escapeHtml(record.toFmt)} has been approved.\n\nPlease coordinate handover with your shift lead before your leave starts.\n\n— Jen, Psulit Money Changer`;
+    memo = `✅ <b>APPROVED — Leave Request</b>\n\n${escapeHtml(record.employee)}, your ${escapeHtml(record.type)} leave ${whenPhrase} has been approved.\n\nPlease coordinate handover with your shift lead before your leave starts.\n\n— Jen, Psulit Money Changer`;
   } else if (decision === 'declined') {
-    memo = `❌ <b>NOT APPROVED — Leave Request</b>\n\n${escapeHtml(record.employee)}, your ${escapeHtml(record.type)} leave request for ${escapeHtml(record.fromFmt)} to ${escapeHtml(record.toFmt)} was not approved at this time.\n\nMessage Jen directly if you'd like to discuss.\n\n— Jen, Psulit Money Changer`;
+    memo = `❌ <b>NOT APPROVED — Leave Request</b>\n\n${escapeHtml(record.employee)}, your ${escapeHtml(record.type)} leave request ${whenPhrase} was not approved at this time.\n\nMessage Jen directly if you'd like to discuss.\n\n— Jen, Psulit Money Changer`;
   } else {
-    memo = `📋 <b>Update on your Leave Request</b>\n\n${escapeHtml(record.employee)}, regarding your ${escapeHtml(record.type)} leave (${escapeHtml(record.fromFmt)} to ${escapeHtml(record.toFmt)}):\n\n${escapeHtml(customText || '')}\n\n— Jen, Psulit Money Changer`;
+    memo = `📋 <b>Update on your Leave Request</b>\n\n${escapeHtml(record.employee)}, regarding your ${escapeHtml(record.type)} leave (${whenPhrase}):\n\n${escapeHtml(customText || '')}\n\n— Jen, Psulit Money Changer`;
   }
 
   if (decision === 'approved') {
@@ -261,6 +266,7 @@ async function saveApprovedLeaveToSupabase(record) {
       date_from: dateFrom,
       date_to: dateTo,
       day_count: parseFloat(record.dayCount) || 0,
+      hours_requested: record.hoursRequested ? parseFloat(record.hoursRequested) : null,
       branch: record.branch,
       reason: record.reason || null,
       status: 'approved'
