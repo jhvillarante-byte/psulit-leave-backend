@@ -13,8 +13,7 @@ const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 5 *
 
 const BOT_TOKEN = process.env.BOT_TOKEN;
 const JEN_CHAT_ID = process.env.JEN_CHAT_ID || '1761414251';
-const GROUP_CHAT_ID = process.env.GROUP_CHAT_ID || '-5459473400';
-const LEAVE_REQUESTS_GROUP_ID = process.env.LEAVE_REQUESTS_GROUP_ID || '-5113867945';
+const GROUP_CHAT_ID = process.env.GROUP_CHAT_ID || '-1004377928049';
 const TELEGRAM_API = `https://api.telegram.org/bot${BOT_TOKEN}`;
 
 // Same Supabase project used by the other Psulit apps (payroll, kiosk, time clock).
@@ -93,7 +92,6 @@ app.post('/submit-leave', upload.single('photo'), async (req, res) => {
     const jenResult = await sendPhoto(JEN_CHAT_ID, req.file.buffer, caption, approveButtons);
     // Send to the group for visibility (no buttons there — only Jen approves)
     await sendPhoto(GROUP_CHAT_ID, req.file.buffer, caption);
-    await sendPhoto(LEAVE_REQUESTS_GROUP_ID, req.file.buffer, caption);
 
     if (!jenResult.ok) {
       console.error('Failed to send to Jen:', jenResult);
@@ -222,7 +220,6 @@ async function resolveRequest(requestId, record, decision, customText) {
       ? `❌ ${record.employee}'s ${record.type} leave (${record.fromFmt} – ${record.toFmt}) — Not approved`
       : `📋 Update posted on ${record.employee}'s ${record.type} leave request (${record.fromFmt} – ${record.toFmt})`;
   await sendMessage(GROUP_CHAT_ID, groupLine);
-  await sendMessage(LEAVE_REQUESTS_GROUP_ID, groupLine);
 
   if (decision === 'approved') {
     const jazelleMemo = `📋 <b>Schedule Adjustment Needed</b>\n\n${escapeHtml(record.employee)}'s ${typeLabel} (${escapeHtml(record.branch)}) was just approved:\n\n${whenPhrase}\n\nShift covered by: ${escapeHtml(record.coverBy || 'TBD')}\n\nPlease adjust the schedule accordingly.\n\n— Jen`;
