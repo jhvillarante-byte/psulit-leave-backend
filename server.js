@@ -6,6 +6,7 @@
 const express = require('express');
 const multer = require('multer');
 const crypto = require('crypto');
+const { createClient } = require('@supabase/supabase-js');
 
 const app = express();
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 5 * 1024 * 1024 } });
@@ -14,6 +15,15 @@ const BOT_TOKEN = process.env.BOT_TOKEN;
 const JEN_CHAT_ID = process.env.JEN_CHAT_ID || '1761414251';
 const GROUP_CHAT_ID = process.env.GROUP_CHAT_ID || '-5459473400';
 const TELEGRAM_API = `https://api.telegram.org/bot${BOT_TOKEN}`;
+
+// Same Supabase project used by the other Psulit apps (payroll, kiosk, time clock).
+// Set these two in Render's environment variables.
+const SUPABASE_URL = process.env.SUPABASE_URL;
+const SUPABASE_KEY = process.env.SUPABASE_KEY;
+const supabase = (SUPABASE_URL && SUPABASE_KEY) ? createClient(SUPABASE_URL, SUPABASE_KEY) : null;
+if (!supabase) {
+  console.error('Missing SUPABASE_URL / SUPABASE_KEY environment variables — approved leaves will NOT be saved for payroll.');
+}
 
 if (!BOT_TOKEN) {
   console.error('Missing BOT_TOKEN environment variable. Set it in Render before deploying.');
@@ -64,7 +74,7 @@ app.post('/submit-leave', upload.single('photo'), async (req, res) => {
     if (!req.file) return res.status(400).json({ ok: false, error: 'Missing photo' });
     if (!employee || !branch || !type) return res.status(400).json({ ok: false, error: 'Missing required fields' });
 
-    const typeEmoji = { Sick: '🤒', Vacation: '🌴', 'Emergency/Other': '⚠️' }[type] || '📋';
+    const typeEmoji = { Sick: '🤒', Vacation: '🌴', 'Emergency/Other': '⚠️', 'Change Off': '🔄', 'Offset Request': '🔁' }[type] || '📋';
     const caption = `${typeEmoji} <b>${escapeHtml(type)} Leave Request</b> — ${escapeHtml(employee)} (${escapeHtml(branch)})`;
 
     const requestId = crypto.randomUUID();
@@ -136,7 +146,7 @@ app.post('/telegram-webhook', async (req, res) => {
 
       // Update her message: remove buttons, show the outcome in the caption
       const decisionLine = decision === 'approved' ? '\n\n✅ <b>APPROVED</b>' : '\n\n❌ <b>DECLINED</b>';
-      const typeEmoji = { Sick: '🤒', Vacation: '🌴', 'Emergency/Other': '⚠️' }[record.type] || '📋';
+      const typeEmoji = { Sick: '🤒', Vacation: '🌴', 'Emergency/Other': '⚠️', 'Change Off': '🔄', 'Offset Request': '🔁' }[record.type] || '📋';
       const baseCaption = `${typeEmoji} <b>${escapeHtml(record.type)} Leave Request</b> — ${escapeHtml(record.employee)} (${escapeHtml(record.branch)})`;
       await editCaption(JEN_CHAT_ID, cq.message.message_id, baseCaption + decisionLine);
 
@@ -178,6 +188,10 @@ async function resolveRequest(requestId, record, decision, customText) {
     memo = `📋 <b>Update on your Leave Request</b>\n\n${escapeHtml(record.employee)}, regarding your ${escapeHtml(record.type)} leave (${escapeHtml(record.fromFmt)} to ${escapeHtml(record.toFmt)}):\n\n${escapeHtml(customText || '')}\n\n— Jen, Psulit Money Changer`;
   }
 
+  if (decision === 'approved') {
+    await saveApprovedLeaveToSupabase(record);
+  }
+
   if (record.employeeChatId) {
     await sendMessage(record.employeeChatId, memo);
     await sendMessage(JEN_CHAT_ID, `✅ Sent to ${record.employee}.`);
@@ -216,6 +230,45 @@ async function resolveRequest(requestId, record, decision, customText) {
 // ---- Helpers ----
 function escapeHtml(s) {
   return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+// Parses a display-formatted date like "August 24, 2026" into "2026-08-24".
+// Falls back to null if it can't be parsed, so a bad date never crashes the save.
+function toISODate(fmtStr) {
+  if (!fmtStr) return null;
+  const d = new Date(fmtStr);
+  if (isNaN(d.getTime())) return null;
+  return d.toISOString().slice(0, 10);
+}
+
+// Saves an approved leave into Supabase so the Payroll app can automatically
+// deduct leave credits and mark the days as leave — no manual re-entry needed.
+async function saveApprovedLeaveToSupabase(record) {
+  if (!supabase) {
+    console.error('Supabase not configured — could not save approved leave for', record.employee);
+    return;
+  }
+  const dateFrom = toISODate(record.fromFmt);
+  const dateTo = toISODate(record.toFmt);
+  if (!dateFrom || !dateTo) {
+    console.error('Could not parse leave dates for', record.employee, record.fromFmt, record.toFmt);
+    return;
+  }
+  try {
+    const { error } = await supabase.from('leave_records').insert({
+      employee_name: record.employee,
+      leave_type: record.type,
+      date_from: dateFrom,
+      date_to: dateTo,
+      day_count: parseFloat(record.dayCount) || 0,
+      branch: record.branch,
+      reason: record.reason || null,
+      status: 'approved'
+    });
+    if (error) console.error('Could not save approved leave to Supabase:', error.message);
+  } catch (err) {
+    console.error('Could not save approved leave to Supabase:', err.message);
+  }
 }
 
 async function sendPhoto(chatId, buffer, caption, replyMarkup) {
