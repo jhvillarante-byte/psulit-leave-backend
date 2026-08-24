@@ -225,11 +225,11 @@ async function resolveRequest(requestId, record, decision, customText) {
   await sendMessage(LEAVE_REQUESTS_GROUP_ID, groupLine);
 
   if (decision === 'approved') {
-    const jazelleMemo = `📋 <b>Schedule Adjustment Needed</b>\n\n${escapeHtml(record.employee)}'s ${escapeHtml(record.type)} leave (${escapeHtml(record.branch)}) was just approved:\n\n${escapeHtml(record.fromFmt)} – ${escapeHtml(record.toFmt)}\n\nShift covered by: ${escapeHtml(record.coverBy || 'TBD')}\n\nPlease adjust the schedule accordingly.\n\n— Jen`;
+    const jazelleMemo = `📋 <b>Schedule Adjustment Needed</b>\n\n${escapeHtml(record.employee)}'s ${typeLabel} (${escapeHtml(record.branch)}) was just approved:\n\n${whenPhrase}\n\nShift covered by: ${escapeHtml(record.coverBy || 'TBD')}\n\nPlease adjust the schedule accordingly.\n\n— Jen`;
     await sendMessage(JAZELLE_CHAT_ID, jazelleMemo);
 
     if (record.coverByChatId) {
-      const coverMemo = `📋 <b>Shift Coverage — ${escapeHtml(record.branch)}</b>\n\nYou're covering for ${escapeHtml(record.employee)} while they're on ${escapeHtml(record.type)} leave:\n\n${escapeHtml(record.fromFmt)} – ${escapeHtml(record.toFmt)}\n\nThanks for covering!\n\n— Jen, Psulit Money Changer`;
+      const coverMemo = `📋 <b>Shift Coverage — ${escapeHtml(record.branch)}</b>\n\nYou're covering for ${escapeHtml(record.employee)} while they're on ${typeLabel}:\n\n${whenPhrase}\n\nThanks for covering!\n\n— Jen, Psulit Money Changer`;
       await sendMessage(record.coverByChatId, coverMemo);
     } else if (record.coverBy) {
       await sendMessage(JEN_CHAT_ID, `⚠️ No Telegram chat ID on file for ${record.coverBy} (covering shift) — couldn't auto-send. Please notify them directly.`);
