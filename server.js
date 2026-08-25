@@ -39,6 +39,11 @@ const EMPLOYEE_CHAT_IDS = {
   'Angelica Besid': '329576744',
   'Joan Legaspi': '6274133553'
 };
+// Reverse lookup (chat ID -> display name) so we can identify who tapped
+// "Acknowledge" on a posted schedule.
+const CHAT_ID_TO_EMPLOYEE = Object.fromEntries(
+  Object.entries(EMPLOYEE_CHAT_IDS).map(([name, id]) => [String(id), name])
+);
 
 // Jazelle handles attendance updates — tagged in the group, and messaged directly, whenever a leave is approved
 const JAZELLE_CHAT_ID = '6196732232';
@@ -190,6 +195,42 @@ app.post('/telegram-webhook', async (req, res) => {
       const data = cq.data || '';
       const [action, requestId] = data.split(':');
 
+      // --- Weekly schedule acknowledgment (view-only group members tapping "Acknowledge") ---
+      if (action === 'sched_ack') {
+        const messageId = cq.message.message_id;
+        const chatId = cq.message.chat.id;
+        const fromId = String(cq.from.id);
+        const employeeName = CHAT_ID_TO_EMPLOYEE[fromId] || cq.from.first_name || 'Someone';
+
+        if (supabase) {
+          try {
+            await supabase.from('schedule_acks').upsert(
+              { message_id: messageId, employee_name: employeeName },
+              { onConflict: 'message_id,employee_name' }
+            );
+            const { data: acks } = await supabase
+              .from('schedule_acks')
+              .select('employee_name')
+              .eq('message_id', messageId)
+              .order('acknowledged_at', { ascending: true });
+            const names = (acks || []).map(a => a.employee_name);
+
+            const currentCaption = cq.message.caption || '';
+            const beforeAck = currentCaption.split('\n\n✅ Acknowledged:')[0];
+            const lines = beforeAck.split('\n');
+            if (lines[0] && lines[0].includes('Weekly Schedule') && !lines[0].includes('<b>')) {
+              lines[0] = lines[0].replace('Weekly Schedule', '<b>Weekly Schedule</b>');
+            }
+            const baseCaption = lines.join('\n');
+            const ackLine = names.length ? `\n\n✅ Acknowledged: ${escapeHtml(names.join(', '))}` : '';
+            await editCaption(chatId, messageId, baseCaption + ackLine, cq.message.reply_markup);
+          } catch (e) {
+            console.error('Could not record acknowledgment:', e.message);
+          }
+        }
+        return answerCallback(cq.id, `Thanks, ${employeeName}!`);
+      }
+
       // --- Weekly schedule approval ---
       if (action === 'schappr' || action === 'schdecl') {
         const schedRecord = pendingScheduleRequests.get(requestId);
@@ -332,9 +373,12 @@ async function resolveScheduleRequest(requestId, record, decision) {
       }
     }
 
-    // Post the branded schedule image to the viewing group.
-    const caption = `📅 <b>Weekly Schedule — ${escapeHtml(record.branch)}</b>\n${escapeHtml(record.weekLabel)}`;
-    const groupResult = await sendPhoto(WEEKLY_SCHEDULE_GROUP_ID, record.imageBuffer, caption);
+    // Post the branded schedule image to the viewing group, with an
+    // "Acknowledge" button so staff can confirm they've seen it (tapping a
+    // button isn't blocked by the group's "no send messages" restriction).
+    const caption = `📅 <b>Weekly Schedule</b>\n${escapeHtml(record.weekLabel)}`;
+    const ackButtons = { inline_keyboard: [[{ text: '✅ Acknowledge', callback_data: 'sched_ack' }]] };
+    const groupResult = await sendPhoto(WEEKLY_SCHEDULE_GROUP_ID, record.imageBuffer, caption, ackButtons);
     if (!groupResult.ok) {
       console.error('Could not post schedule to group:', groupResult);
       await sendMessage(JEN_CHAT_ID, `⚠️ Approved, but couldn't post the schedule image to the group: ${escapeHtml(groupResult.description || 'unknown error')}. Make sure the bot is a member (and admin, if the group restricts posting) of that chat.`);
@@ -415,7 +459,7 @@ async function sendMessage(chatId, text) {
   return resp.json();
 }
 
-async function editCaption(chatId, messageId, caption) {
+async function editCaption(chatId, messageId, caption, replyMarkup) {
   const resp = await fetch(`${TELEGRAM_API}/editMessageCaption`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -424,7 +468,7 @@ async function editCaption(chatId, messageId, caption) {
       message_id: messageId,
       caption,
       parse_mode: 'HTML',
-      reply_markup: { inline_keyboard: [] }
+      reply_markup: replyMarkup || { inline_keyboard: [] }
     })
   });
   return resp.json();
