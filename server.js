@@ -334,7 +334,11 @@ async function resolveScheduleRequest(requestId, record, decision) {
 
     // Post the branded schedule image to the viewing group.
     const caption = `📅 <b>Weekly Schedule — ${escapeHtml(record.branch)}</b>\n${escapeHtml(record.weekLabel)}`;
-    await sendPhoto(WEEKLY_SCHEDULE_GROUP_ID, record.imageBuffer, caption);
+    const groupResult = await sendPhoto(WEEKLY_SCHEDULE_GROUP_ID, record.imageBuffer, caption);
+    if (!groupResult.ok) {
+      console.error('Could not post schedule to group:', groupResult);
+      await sendMessage(JEN_CHAT_ID, `⚠️ Approved, but couldn't post the schedule image to the group: ${escapeHtml(groupResult.description || 'unknown error')}. Make sure the bot is a member (and admin, if the group restricts posting) of that chat.`);
+    }
 
     await sendMessage(JAZELLE_CHAT_ID, `✅ Your ${escapeHtml(record.branch)} weekly schedule (${escapeHtml(record.weekLabel)}) was approved and posted to the group.`);
   } else {
