@@ -13,7 +13,9 @@ const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 5 *
 
 const BOT_TOKEN = process.env.BOT_TOKEN;
 const JEN_CHAT_ID = process.env.JEN_CHAT_ID || '1761414251';
-const GROUP_CHAT_ID = process.env.GROUP_CHAT_ID || '-1004377928049';
+const GROUP_CHAT_ID = process.env.GROUP_CHAT_ID || '-5459473400';
+const LEAVE_REQUESTS_GROUP_ID = process.env.LEAVE_REQUESTS_GROUP_ID || '-5113867945';
+const WEEKLY_SCHEDULE_GROUP_ID = process.env.WEEKLY_SCHEDULE_GROUP_ID || '-5135138624';
 const TELEGRAM_API = `https://api.telegram.org/bot${BOT_TOKEN}`;
 
 // Same Supabase project used by the other Psulit apps (payroll, kiosk, time clock).
@@ -48,6 +50,9 @@ const ATTENDANCE_TAG = `<a href="tg://user?id=${JAZELLE_CHAT_ID}">Jazelle</a>`;
 // or ping Claude to add persistent storage if same-day gaps become an issue.
 const pendingRequests = new Map();      // requestId -> record
 const messageIdIndex = new Map();       // jenMessageId -> requestId
+
+const pendingScheduleRequests = new Map();   // requestId -> schedule record
+const scheduleMessageIdIndex = new Map();    // jenMessageId -> requestId
 
 // Basic CORS so the Netlify-hosted form can call this backend
 app.use((req, res, next) => {
@@ -92,6 +97,7 @@ app.post('/submit-leave', upload.single('photo'), async (req, res) => {
     const jenResult = await sendPhoto(JEN_CHAT_ID, req.file.buffer, caption, approveButtons);
     // Send to the group for visibility (no buttons there — only Jen approves)
     await sendPhoto(GROUP_CHAT_ID, req.file.buffer, caption);
+    await sendPhoto(LEAVE_REQUESTS_GROUP_ID, req.file.buffer, caption);
 
     if (!jenResult.ok) {
       console.error('Failed to send to Jen:', jenResult);
@@ -120,6 +126,57 @@ app.post('/submit-leave', upload.single('photo'), async (req, res) => {
   }
 });
 
+// ---- Submit a weekly schedule for approval ----
+// Expects multipart/form-data: image (PNG blob), branch, weekLabel, weekStart, weekEnd,
+// scheduleData (JSON string: [{category, date, employee_name}, ...])
+app.post('/submit-schedule', upload.single('image'), async (req, res) => {
+  try {
+    const { branch, weekLabel, weekStart, weekEnd, scheduleData } = req.body;
+
+    if (!req.file) return res.status(400).json({ ok: false, error: 'Missing image' });
+    if (!branch || !weekLabel || !weekStart || !weekEnd) {
+      return res.status(400).json({ ok: false, error: 'Missing required fields' });
+    }
+
+    let parsedRows = [];
+    try { parsedRows = JSON.parse(scheduleData || '[]'); } catch (e) { /* leave empty if unparsable */ }
+
+    const caption = `📅 <b>Weekly Schedule — ${escapeHtml(branch)}</b>\n${escapeHtml(weekLabel)}\n\nSubmitted by Jazelle for your approval.`;
+
+    const requestId = crypto.randomUUID();
+    const approveButtons = {
+      inline_keyboard: [[
+        { text: '✅ Approve', callback_data: `schappr:${requestId}` },
+        { text: '❌ Decline', callback_data: `schdecl:${requestId}` }
+      ]]
+    };
+
+    const jenResult = await sendPhoto(JEN_CHAT_ID, req.file.buffer, caption, approveButtons);
+    if (!jenResult.ok) {
+      console.error('Failed to send schedule to Jen:', jenResult);
+      return res.status(502).json({ ok: false, error: 'Telegram send failed' });
+    }
+
+    const jenMessageId = jenResult.result.message_id;
+    const record = {
+      branch, weekLabel, weekStart, weekEnd,
+      scheduleRows: parsedRows,
+      imageBuffer: req.file.buffer,
+      jenMessageId,
+      createdAt: Date.now(),
+      status: 'pending'
+    };
+
+    pendingScheduleRequests.set(requestId, record);
+    scheduleMessageIdIndex.set(jenMessageId, requestId);
+
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('submit-schedule error:', err);
+    res.status(500).json({ ok: false, error: 'Server error' });
+  }
+});
+
 // ---- Telegram webhook: handles button taps and typed replies ----
 app.post('/telegram-webhook', async (req, res) => {
   res.sendStatus(200); // ack immediately, Telegram expects a fast response
@@ -132,6 +189,23 @@ app.post('/telegram-webhook', async (req, res) => {
       const cq = update.callback_query;
       const data = cq.data || '';
       const [action, requestId] = data.split(':');
+
+      // --- Weekly schedule approval ---
+      if (action === 'schappr' || action === 'schdecl') {
+        const schedRecord = pendingScheduleRequests.get(requestId);
+        if (!schedRecord) {
+          return answerCallback(cq.id, 'This schedule is no longer pending.');
+        }
+        const decision = action === 'schappr' ? 'approved' : 'declined';
+        await resolveScheduleRequest(requestId, schedRecord, decision);
+        await answerCallback(cq.id, decision === 'approved' ? 'Approved ✅' : 'Declined ❌');
+
+        const decisionLine = decision === 'approved' ? '\n\n✅ <b>APPROVED</b>' : '\n\n❌ <b>DECLINED</b>';
+        const baseCaption = `📅 <b>Weekly Schedule — ${escapeHtml(schedRecord.branch)}</b>\n${escapeHtml(schedRecord.weekLabel)}`;
+        await editCaption(JEN_CHAT_ID, cq.message.message_id, baseCaption + decisionLine);
+        return;
+      }
+
       if (!requestId || (action !== 'appr' && action !== 'decl')) {
         return answerCallback(cq.id, 'Unrecognized action');
       }
@@ -220,6 +294,7 @@ async function resolveRequest(requestId, record, decision, customText) {
       ? `❌ ${record.employee}'s ${record.type} leave (${record.fromFmt} – ${record.toFmt}) — Not approved`
       : `📋 Update posted on ${record.employee}'s ${record.type} leave request (${record.fromFmt} – ${record.toFmt})`;
   await sendMessage(GROUP_CHAT_ID, groupLine);
+  await sendMessage(LEAVE_REQUESTS_GROUP_ID, groupLine);
 
   if (decision === 'approved') {
     const jazelleMemo = `📋 <b>Schedule Adjustment Needed</b>\n\n${escapeHtml(record.employee)}'s ${typeLabel} (${escapeHtml(record.branch)}) was just approved:\n\n${whenPhrase}\n\nShift covered by: ${escapeHtml(record.coverBy || 'TBD')}\n\nPlease adjust the schedule accordingly.\n\n— Jen`;
@@ -236,6 +311,39 @@ async function resolveRequest(requestId, record, decision, customText) {
   record.status = decision;
   pendingRequests.delete(requestId);
   messageIdIndex.delete(record.jenMessageId);
+}
+
+// ---- Resolution logic for weekly schedule approvals ----
+async function resolveScheduleRequest(requestId, record, decision) {
+  if (decision === 'approved') {
+    // Save the schedule into Supabase so the Payroll app's Schedule tab shows it too.
+    if (supabase && Array.isArray(record.scheduleRows) && record.scheduleRows.length) {
+      try {
+        await supabase.from('weekly_schedule')
+          .delete()
+          .eq('branch', record.branch)
+          .gte('date', record.weekStart)
+          .lte('date', record.weekEnd);
+        const rows = record.scheduleRows.map(r => ({ branch: record.branch, category: r.category, date: r.date, employee_name: r.employee_name }));
+        const { error } = await supabase.from('weekly_schedule').insert(rows);
+        if (error) console.error('Could not save approved schedule to Supabase:', error.message);
+      } catch (err) {
+        console.error('Could not save approved schedule to Supabase:', err.message);
+      }
+    }
+
+    // Post the branded schedule image to the viewing group.
+    const caption = `📅 <b>Weekly Schedule — ${escapeHtml(record.branch)}</b>\n${escapeHtml(record.weekLabel)}`;
+    await sendPhoto(WEEKLY_SCHEDULE_GROUP_ID, record.imageBuffer, caption);
+
+    await sendMessage(JAZELLE_CHAT_ID, `✅ Your ${escapeHtml(record.branch)} weekly schedule (${escapeHtml(record.weekLabel)}) was approved and posted to the group.`);
+  } else {
+    await sendMessage(JAZELLE_CHAT_ID, `❌ Your ${escapeHtml(record.branch)} weekly schedule (${escapeHtml(record.weekLabel)}) was not approved. Please check with Jen and resubmit.`);
+  }
+
+  record.status = decision;
+  pendingScheduleRequests.delete(requestId);
+  scheduleMessageIdIndex.delete(record.jenMessageId);
 }
 
 // ---- Helpers ----
