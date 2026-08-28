@@ -102,7 +102,9 @@ app.post('/submit-leave', upload.single('photo'), async (req, res) => {
     const jenResult = await sendPhoto(JEN_CHAT_ID, req.file.buffer, caption, approveButtons);
     // Send to the group for visibility (no buttons there — only Jen approves)
     const groupPhotoResult = await sendPhoto(GROUP_CHAT_ID, req.file.buffer, caption);
+    if (!groupPhotoResult.ok) console.error('Could not post submission photo to GROUP_CHAT_ID:', JSON.stringify(groupPhotoResult));
     const leaveGroupPhotoResult = await sendPhoto(LEAVE_REQUESTS_GROUP_ID, req.file.buffer, caption);
+    if (!leaveGroupPhotoResult.ok) console.error('Could not post submission photo to LEAVE_REQUESTS_GROUP_ID:', JSON.stringify(leaveGroupPhotoResult));
 
     if (!jenResult.ok) {
       console.error('Failed to send to Jen:', jenResult);
