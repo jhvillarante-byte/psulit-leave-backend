@@ -346,12 +346,12 @@ async function resolveRequest(requestId, record, decision, customText) {
     : decision === 'declined'
       ? `❌ ${record.employee}'s ${record.type} leave (${record.fromFmt} – ${record.toFmt}) — Not approved`
       : `📋 Update posted on ${record.employee}'s ${record.type} leave request (${record.fromFmt} – ${record.toFmt})`;
-  const groupResult1 = await sendMessage(GROUP_CHAT_ID, groupLine, record.groupMessageId);
+  const groupResult1 = await sendMessage(GROUP_CHAT_ID, groupLine);
   if (!groupResult1.ok) {
     console.error('Could not post to GROUP_CHAT_ID:', JSON.stringify(groupResult1));
     await sendMessage(JEN_CHAT_ID, `⚠️ Couldn't post the update to the main group chat: ${escapeHtml(groupResult1.description || 'unknown error')}`);
   }
-  const groupResult2 = await sendMessage(LEAVE_REQUESTS_GROUP_ID, groupLine, record.leaveGroupMessageId);
+  const groupResult2 = await sendMessage(LEAVE_REQUESTS_GROUP_ID, groupLine);
   if (!groupResult2.ok) {
     console.error('Could not post to LEAVE_REQUESTS_GROUP_ID:', JSON.stringify(groupResult2));
     await sendMessage(JEN_CHAT_ID, `⚠️ Couldn't post the update to the leave requests group: ${escapeHtml(groupResult2.description || 'unknown error')}`);
