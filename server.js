@@ -99,12 +99,8 @@ app.post('/submit-leave', upload.single('photo'), async (req, res) => {
 
     // Send to Jen privately with tappable buttons — capture message_id as a fallback
     // matcher in case she prefers to type a reply instead of tapping.
+    // Groups don't see anything yet — only once Jen approves or declines.
     const jenResult = await sendPhoto(JEN_CHAT_ID, req.file.buffer, caption, approveButtons);
-    // Send to the group for visibility (no buttons there — only Jen approves)
-    const groupPhotoResult = await sendPhoto(GROUP_CHAT_ID, req.file.buffer, caption);
-    if (!groupPhotoResult.ok) console.error('Could not post submission photo to GROUP_CHAT_ID:', JSON.stringify(groupPhotoResult));
-    const leaveGroupPhotoResult = await sendPhoto(LEAVE_REQUESTS_GROUP_ID, req.file.buffer, caption);
-    if (!leaveGroupPhotoResult.ok) console.error('Could not post submission photo to LEAVE_REQUESTS_GROUP_ID:', JSON.stringify(leaveGroupPhotoResult));
 
     if (!jenResult.ok) {
       console.error('Failed to send to Jen:', jenResult);
@@ -112,15 +108,14 @@ app.post('/submit-leave', upload.single('photo'), async (req, res) => {
     }
 
     const jenMessageId = jenResult.result.message_id;
-    const groupMessageId = groupPhotoResult.ok ? groupPhotoResult.result.message_id : null;
-    const leaveGroupMessageId = leaveGroupPhotoResult.ok ? leaveGroupPhotoResult.result.message_id : null;
     const employeeChatId = EMPLOYEE_CHAT_IDS[employee] || null;
     const coverByChatId = EMPLOYEE_CHAT_IDS[coverBy] || null;
 
     const record = {
       employee, coverBy, coverByChatId, branch, type, fromFmt, toFmt, dayCount, hoursRequested, reason, contact, slipNo,
       employeeChatId,
-      jenMessageId, groupMessageId, leaveGroupMessageId,
+      jenMessageId,
+      imageBuffer: req.file.buffer,
       createdAt: Date.now(),
       status: 'pending'
     };
@@ -353,26 +348,16 @@ async function resolveRequest(requestId, record, decision, customText) {
       : `📋 Update posted`;
   const updatedCaption = originalCaption + '\n\n' + decisionLine;
 
-  if (record.groupMessageId) {
-    const groupResult1 = await editCaption(GROUP_CHAT_ID, record.groupMessageId, updatedCaption);
-    if (!groupResult1.ok) {
-      console.error('Could not update caption on GROUP_CHAT_ID:', JSON.stringify(groupResult1));
-      await sendMessage(JEN_CHAT_ID, `⚠️ Couldn't update the image caption in the main group chat: ${escapeHtml(groupResult1.description || 'unknown error')}`);
-    }
-  } else {
-    await sendMessage(JEN_CHAT_ID, `⚠️ No stored image message to update in the main group chat for this older request — posting the update separately instead.`);
-    await sendMessage(GROUP_CHAT_ID, updatedCaption);
+  const groupResult1 = await sendPhoto(GROUP_CHAT_ID, record.imageBuffer, updatedCaption);
+  if (!groupResult1.ok) {
+    console.error('Could not post to GROUP_CHAT_ID:', JSON.stringify(groupResult1));
+    await sendMessage(JEN_CHAT_ID, `⚠️ Couldn't post the update to the main group chat: ${escapeHtml(groupResult1.description || 'unknown error')}`);
   }
 
-  if (record.leaveGroupMessageId) {
-    const groupResult2 = await editCaption(LEAVE_REQUESTS_GROUP_ID, record.leaveGroupMessageId, updatedCaption);
-    if (!groupResult2.ok) {
-      console.error('Could not update caption on LEAVE_REQUESTS_GROUP_ID:', JSON.stringify(groupResult2));
-      await sendMessage(JEN_CHAT_ID, `⚠️ Couldn't update the image caption in the leave requests group: ${escapeHtml(groupResult2.description || 'unknown error')}`);
-    }
-  } else {
-    await sendMessage(JEN_CHAT_ID, `⚠️ No stored image message to update in the leave requests group for this older request — posting the update separately instead.`);
-    await sendMessage(LEAVE_REQUESTS_GROUP_ID, updatedCaption);
+  const groupResult2 = await sendPhoto(LEAVE_REQUESTS_GROUP_ID, record.imageBuffer, updatedCaption);
+  if (!groupResult2.ok) {
+    console.error('Could not post to LEAVE_REQUESTS_GROUP_ID:', JSON.stringify(groupResult2));
+    await sendMessage(JEN_CHAT_ID, `⚠️ Couldn't post the update to the leave requests group: ${escapeHtml(groupResult2.description || 'unknown error')}`);
   }
 
   if (decision === 'approved') {
