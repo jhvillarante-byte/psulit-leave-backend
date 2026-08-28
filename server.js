@@ -101,8 +101,8 @@ app.post('/submit-leave', upload.single('photo'), async (req, res) => {
     // matcher in case she prefers to type a reply instead of tapping.
     const jenResult = await sendPhoto(JEN_CHAT_ID, req.file.buffer, caption, approveButtons);
     // Send to the group for visibility (no buttons there — only Jen approves)
-    await sendPhoto(GROUP_CHAT_ID, req.file.buffer, caption);
-    await sendPhoto(LEAVE_REQUESTS_GROUP_ID, req.file.buffer, caption);
+    const groupPhotoResult = await sendPhoto(GROUP_CHAT_ID, req.file.buffer, caption);
+    const leaveGroupPhotoResult = await sendPhoto(LEAVE_REQUESTS_GROUP_ID, req.file.buffer, caption);
 
     if (!jenResult.ok) {
       console.error('Failed to send to Jen:', jenResult);
@@ -110,13 +110,15 @@ app.post('/submit-leave', upload.single('photo'), async (req, res) => {
     }
 
     const jenMessageId = jenResult.result.message_id;
+    const groupMessageId = groupPhotoResult.ok ? groupPhotoResult.result.message_id : null;
+    const leaveGroupMessageId = leaveGroupPhotoResult.ok ? leaveGroupPhotoResult.result.message_id : null;
     const employeeChatId = EMPLOYEE_CHAT_IDS[employee] || null;
     const coverByChatId = EMPLOYEE_CHAT_IDS[coverBy] || null;
 
     const record = {
       employee, coverBy, coverByChatId, branch, type, fromFmt, toFmt, dayCount, hoursRequested, reason, contact, slipNo,
       employeeChatId,
-      jenMessageId,
+      jenMessageId, groupMessageId, leaveGroupMessageId,
       createdAt: Date.now(),
       status: 'pending'
     };
@@ -188,6 +190,13 @@ app.post('/telegram-webhook', async (req, res) => {
 
   try {
     const update = req.body;
+
+    // TEMPORARY DEBUG: log any plain message's chat info, so we can find a
+    // group's chat ID after it gets upgraded to a supergroup. Safe to remove
+    // once no longer needed.
+    if (update.message) {
+      console.log('DEBUG message chat:', JSON.stringify(update.message.chat));
+    }
 
     // --- Button tap ---
     if (update.callback_query) {
@@ -335,12 +344,12 @@ async function resolveRequest(requestId, record, decision, customText) {
     : decision === 'declined'
       ? `❌ ${record.employee}'s ${record.type} leave (${record.fromFmt} – ${record.toFmt}) — Not approved`
       : `📋 Update posted on ${record.employee}'s ${record.type} leave request (${record.fromFmt} – ${record.toFmt})`;
-  const groupResult1 = await sendMessage(GROUP_CHAT_ID, groupLine);
+  const groupResult1 = await sendMessage(GROUP_CHAT_ID, groupLine, record.groupMessageId);
   if (!groupResult1.ok) {
     console.error('Could not post to GROUP_CHAT_ID:', JSON.stringify(groupResult1));
     await sendMessage(JEN_CHAT_ID, `⚠️ Couldn't post the update to the main group chat: ${escapeHtml(groupResult1.description || 'unknown error')}`);
   }
-  const groupResult2 = await sendMessage(LEAVE_REQUESTS_GROUP_ID, groupLine);
+  const groupResult2 = await sendMessage(LEAVE_REQUESTS_GROUP_ID, groupLine, record.leaveGroupMessageId);
   if (!groupResult2.ok) {
     console.error('Could not post to LEAVE_REQUESTS_GROUP_ID:', JSON.stringify(groupResult2));
     await sendMessage(JEN_CHAT_ID, `⚠️ Couldn't post the update to the leave requests group: ${escapeHtml(groupResult2.description || 'unknown error')}`);
@@ -459,11 +468,16 @@ async function sendPhoto(chatId, buffer, caption, replyMarkup) {
   return resp.json();
 }
 
-async function sendMessage(chatId, text) {
+async function sendMessage(chatId, text, replyToMessageId) {
+  const body = { chat_id: chatId, text, parse_mode: 'HTML' };
+  if (replyToMessageId) {
+    body.reply_to_message_id = replyToMessageId;
+    body.allow_sending_without_reply = true; // don't fail if the original got deleted
+  }
   const resp = await fetch(`${TELEGRAM_API}/sendMessage`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ chat_id: chatId, text, parse_mode: 'HTML' })
+    body: JSON.stringify(body)
   });
   return resp.json();
 }
