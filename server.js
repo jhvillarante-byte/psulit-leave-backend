@@ -14,7 +14,7 @@ const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 5 *
 const BOT_TOKEN = process.env.BOT_TOKEN;
 const JEN_CHAT_ID = process.env.JEN_CHAT_ID || '1761414251';
 const GROUP_CHAT_ID = process.env.GROUP_CHAT_ID || '-5459473400';
-const LEAVE_REQUESTS_GROUP_ID = process.env.LEAVE_REQUESTS_GROUP_ID || '-5113867945';
+const LEAVE_REQUESTS_GROUP_ID = process.env.LEAVE_REQUESTS_GROUP_ID || '-1004377928049';
 const WEEKLY_SCHEDULE_GROUP_ID = process.env.WEEKLY_SCHEDULE_GROUP_ID || '-5135138624';
 const TELEGRAM_API = `https://api.telegram.org/bot${BOT_TOKEN}`;
 
@@ -341,20 +341,38 @@ async function resolveRequest(requestId, record, decision, customText) {
     ? `<a href="tg://user?id=${record.coverByChatId}">${escapeHtml(record.coverBy)}</a>`
     : escapeHtml(record.coverBy || '');
 
-  const groupLine = decision === 'approved'
-    ? `✅ ${record.employee}'s ${record.type} leave (${record.fromFmt} – ${record.toFmt}) — Approved\n\nShift covered by: ${coverTag}\n\n${ATTENDANCE_TAG}, please adjust schedule accordingly. Thank you!`
+  const typeEmoji = { Sick: '🤒', Vacation: '🌴', 'Emergency/Other': '⚠️', 'Change Off': '🔄', 'Offset Request': '🔁' }[record.type] || '📋';
+  const durationText = (record.type === 'Offset Request' && record.hoursRequested) ? ` — ${escapeHtml(record.hoursRequested)}h` : '';
+  const labelText = record.type === 'Offset Request' ? `Offset Request${durationText}` : `${escapeHtml(record.type)} Leave Request`;
+  const originalCaption = `${typeEmoji} <b>${labelText}</b> — ${escapeHtml(record.employee)} (${escapeHtml(record.branch)})`;
+
+  const decisionLine = decision === 'approved'
+    ? `✅ <b>Approved</b>\n\nShift covered by: ${coverTag}\n\n${ATTENDANCE_TAG}, please adjust schedule accordingly. Thank you!`
     : decision === 'declined'
-      ? `❌ ${record.employee}'s ${record.type} leave (${record.fromFmt} – ${record.toFmt}) — Not approved`
-      : `📋 Update posted on ${record.employee}'s ${record.type} leave request (${record.fromFmt} – ${record.toFmt})`;
-  const groupResult1 = await sendMessage(GROUP_CHAT_ID, groupLine);
-  if (!groupResult1.ok) {
-    console.error('Could not post to GROUP_CHAT_ID:', JSON.stringify(groupResult1));
-    await sendMessage(JEN_CHAT_ID, `⚠️ Couldn't post the update to the main group chat: ${escapeHtml(groupResult1.description || 'unknown error')}`);
+      ? `❌ <b>Not approved</b>`
+      : `📋 Update posted`;
+  const updatedCaption = originalCaption + '\n\n' + decisionLine;
+
+  if (record.groupMessageId) {
+    const groupResult1 = await editCaption(GROUP_CHAT_ID, record.groupMessageId, updatedCaption);
+    if (!groupResult1.ok) {
+      console.error('Could not update caption on GROUP_CHAT_ID:', JSON.stringify(groupResult1));
+      await sendMessage(JEN_CHAT_ID, `⚠️ Couldn't update the image caption in the main group chat: ${escapeHtml(groupResult1.description || 'unknown error')}`);
+    }
+  } else {
+    await sendMessage(JEN_CHAT_ID, `⚠️ No stored image message to update in the main group chat for this older request — posting the update separately instead.`);
+    await sendMessage(GROUP_CHAT_ID, updatedCaption);
   }
-  const groupResult2 = await sendMessage(LEAVE_REQUESTS_GROUP_ID, groupLine);
-  if (!groupResult2.ok) {
-    console.error('Could not post to LEAVE_REQUESTS_GROUP_ID:', JSON.stringify(groupResult2));
-    await sendMessage(JEN_CHAT_ID, `⚠️ Couldn't post the update to the leave requests group: ${escapeHtml(groupResult2.description || 'unknown error')}`);
+
+  if (record.leaveGroupMessageId) {
+    const groupResult2 = await editCaption(LEAVE_REQUESTS_GROUP_ID, record.leaveGroupMessageId, updatedCaption);
+    if (!groupResult2.ok) {
+      console.error('Could not update caption on LEAVE_REQUESTS_GROUP_ID:', JSON.stringify(groupResult2));
+      await sendMessage(JEN_CHAT_ID, `⚠️ Couldn't update the image caption in the leave requests group: ${escapeHtml(groupResult2.description || 'unknown error')}`);
+    }
+  } else {
+    await sendMessage(JEN_CHAT_ID, `⚠️ No stored image message to update in the leave requests group for this older request — posting the update separately instead.`);
+    await sendMessage(LEAVE_REQUESTS_GROUP_ID, updatedCaption);
   }
 
   if (decision === 'approved') {
