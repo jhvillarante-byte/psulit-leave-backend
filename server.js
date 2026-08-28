@@ -248,6 +248,7 @@ app.post('/telegram-webhook', async (req, res) => {
       }
 
       if (!requestId || (action !== 'appr' && action !== 'decl')) {
+        console.error('Unrecognized callback action. Raw data:', JSON.stringify(data), 'parsed action:', JSON.stringify(action), 'requestId:', JSON.stringify(requestId));
         return answerCallback(cq.id, 'Unrecognized action');
       }
 
