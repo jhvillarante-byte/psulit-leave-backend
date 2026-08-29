@@ -262,6 +262,11 @@ app.post('/telegram-webhook', async (req, res) => {
       if (!record) {
         return answerCallback(cq.id, 'This request is no longer pending.');
       }
+      // Claim it immediately — removing it here (not at the end of
+      // resolveRequest) closes the race window where a double-tap or a
+      // Telegram retry could both see the record as still pending and both
+      // send out duplicate approval messages.
+      pendingRequests.delete(requestId);
 
       const decision = action === 'appr' ? 'approved' : 'declined';
       await resolveRequest(requestId, record, decision);
@@ -297,6 +302,10 @@ app.post('/telegram-webhook', async (req, res) => {
     let decision = 'custom';
     if (lower.includes('approve') || replyText === '✅') decision = 'approved';
     else if (lower.includes('declin') || lower.includes('reject') || lower.includes('not approved') || replyText === '❌') decision = 'declined';
+
+    // Claim it immediately, same reasoning as the button-tap path above —
+    // prevents a duplicate send if this fires more than once for the same request.
+    pendingRequests.delete(requestId);
 
     await resolveRequest(requestId, record, decision, decision === 'custom' ? replyText : null);
   } catch (err) {
