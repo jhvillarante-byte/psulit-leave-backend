@@ -85,7 +85,7 @@ async function answerCallback(callbackQueryId, text) {
 async function resolveRequest(requestId, record, decision, customText) {
   let memo;
   if (decision === 'approved') {
-    memo = `✅ <b>APPROVED — Leave Request</b>\n\n${escapeHtml(record.employee)}, your ${escapeHtml(record.type)} leave from ${escapeHtml(record.from_fmt)} to ${escapeHtml(record.to_fmt)} has been approved.\n\nPlease coordinate handover with your shift lead before your leave starts.\n\n— Jen, Psulit Money Changer`;
+    memo = `✅ <b>APPROVED — Leave Request</b>\n\n${escapeHtml(record.employee)}, your ${escapeHtml(record.type)} leave from ${escapeHtml(record.from_fmt)} to ${escapeHtml(record.to_fmt)} has been approved.\n\n— Jen, Psulit Money Changer`;
   } else if (decision === 'declined') {
     memo = `❌ <b>NOT APPROVED — Leave Request</b>\n\n${escapeHtml(record.employee)}, your ${escapeHtml(record.type)} leave request for ${escapeHtml(record.from_fmt)} to ${escapeHtml(record.to_fmt)} was not approved at this time.\n\nMessage Jen directly if you'd like to discuss.\n\n— Jen, Psulit Money Changer`;
   } else {
