@@ -1,0 +1,16 @@
+[build]
+  functions = "netlify/functions"
+  publish = "."
+
+[functions]
+  node_bundler = "esbuild"
+
+[[redirects]]
+  from = "/api/submit-leave"
+  to = "/.netlify/functions/submit-leave"
+  status = 200
+
+[[redirects]]
+  from = "/api/telegram-webhook"
+  to = "/.netlify/functions/telegram-webhook"
+  status = 200

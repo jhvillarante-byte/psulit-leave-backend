@@ -1,17 +1,10 @@
 {
-  "name": "psulit-leave-backend",
+  "name": "psulit-leave-request",
   "version": "1.0.0",
-  "description": "Backend for Psulit Leave Request Slip — posts to Telegram and routes Jen's approval replies to employees",
-  "main": "server.js",
-  "engines": {
-    "node": ">=18.0.0"
-  },
-  "scripts": {
-    "start": "node server.js"
-  },
+  "description": "Psulit Leave Request — Netlify site (form + serverless functions)",
+  "private": true,
   "dependencies": {
-    "express": "^4.22.2",
-    "multer": "^2.2.0",
-    "@supabase/supabase-js": "^2.45.0"
+    "@supabase/supabase-js": "^2.45.0",
+    "parse-multipart-data": "^1.5.0"
   }
 }
