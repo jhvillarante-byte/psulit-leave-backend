@@ -56,6 +56,49 @@ async function sendMessage(chatId, text) {
   return resp.json();
 }
 
+async function syncLeaveRequestToGoogleSheet(record, statusOverride) {
+  const url = process.env.GOOGLE_SHEETS_SYNC_URL;
+  const secret = process.env.GOOGLE_SHEETS_SYNC_SECRET;
+  if (!url || !secret) throw new Error('Google Sheets sync is not configured on the Leave App server');
+
+  const recordForSheet = {
+    request_id: record.request_id || record.requestId || '',
+    employee: record.employee || '',
+    cover_by: record.cover_by || record.coverBy || '',
+    branch: record.branch || '',
+    type: record.type || '',
+    from_fmt: record.from_fmt || record.fromFmt || '',
+    to_fmt: record.to_fmt || record.toFmt || '',
+    date_from: record.date_from || record.dateFrom || '',
+    date_to: record.date_to || record.dateTo || '',
+    day_count: record.day_count != null ? record.day_count : (record.dayCount || ''),
+    hours_requested: record.hours_requested != null ? record.hours_requested : (record.hoursRequested || ''),
+    reason: record.reason || '',
+    contact: record.contact || '',
+    slip_no: record.slip_no || record.slipNo || '',
+    status: statusOverride || record.status || 'pending',
+    created_at: record.created_at || new Date().toISOString(),
+    updated_at: new Date().toISOString()
+  };
+
+  const resp = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+    body: JSON.stringify({
+      secret,
+      action: 'upsert',
+      sheet: 'LEAVE',
+      record: recordForSheet
+    })
+  });
+  let data = {};
+  try { data = await resp.json(); } catch (_) {}
+  if (!resp.ok || data.ok !== true) {
+    throw new Error(data.error || ('Google Sheets sync failed (HTTP ' + resp.status + ')'));
+  }
+  return data;
+}
+
 async function editCaption(chatId, messageId, caption) {
   const resp = await fetch(`${TELEGRAM_API}/editMessageCaption`, {
     method: 'POST',
@@ -127,6 +170,13 @@ async function resolveRequest(requestId, record, decision, customText) {
   }
 
   await supabase.from('leave_requests').update({ status: decision }).eq('request_id', requestId);
+
+  try {
+    await syncLeaveRequestToGoogleSheet(record, decision);
+  } catch (sheetErr) {
+    console.error('Google Sheets leave ledger sync failed:', sheetErr);
+    await sendMessage(JEN_CHAT_ID, `⚠️ Leave status was updated in Telegram/database, but Google Sheets LEAVE LEDGER sync failed for ${escapeHtml(record.employee)}. Please check the ledger connection.`);
+  }
 }
 
 // Writes an approved leave into Payroll's leave_records table.
@@ -167,5 +217,5 @@ module.exports = {
   BOT_TOKEN, JEN_CHAT_ID, GROUP_CHAT_ID, TELEGRAM_API,
   supabase, payrollSupabase, EMPLOYEE_CHAT_IDS, JAZELLE_CHAT_ID, ATTENDANCE_TAG,
   escapeHtml, sendPhoto, sendMessage, editCaption, answerCallback, resolveRequest,
-  recordLeaveInPayroll
+  recordLeaveInPayroll, syncLeaveRequestToGoogleSheet
 };
