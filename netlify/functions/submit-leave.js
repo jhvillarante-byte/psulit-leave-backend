@@ -74,6 +74,21 @@ exports.handler = async (event) => {
       return { statusCode: 500, body: JSON.stringify({ ok: false, error: 'Database error' }) };
     }
 
+    try {
+      await require('./_lib/shared').syncLeaveRequestToGoogleSheet({
+        request_id: requestId,
+        employee, cover_by: coverBy || '',
+        branch, type, from_fmt: fromFmt, to_fmt: toFmt,
+        date_from: dateFrom || '', date_to: dateTo || '',
+        day_count: dayCount, hours_requested: hoursRequested ? Number(hoursRequested) : '',
+        reason, contact, slip_no: slipNo, status: 'pending',
+        created_at: new Date().toISOString()
+      }, 'pending');
+    } catch (sheetErr) {
+      console.error('Google Sheets leave ledger sync failed:', sheetErr);
+      await require('./_lib/shared').sendMessage(JEN_CHAT_ID, '⚠️ Leave request was sent to Telegram, but Google Sheets LEAVE LEDGER sync failed. Please check the ledger connection.');
+    }
+
     return { statusCode: 200, body: JSON.stringify({ ok: true }) };
   } catch (err) {
     console.error('submit-leave error:', err);
