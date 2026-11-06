@@ -123,39 +123,52 @@ async function answerCallback(callbackQueryId, text) {
   return resp.json();
 }
 
-// Shared resolution logic for both button taps and typed replies.
-// `record` here uses the Supabase column names (snake_case).
+// Shared resolution logic. Jen is the sole approver (JEN_CHAT_ID).
+// Approval/rejection is claimed atomically so a repeated Telegram callback
+// cannot post twice or deduct leave credits twice.
 async function resolveRequest(requestId, record, decision, customText) {
-  let memo;
-  if (decision === 'approved') {
-    memo = `✅ <b>APPROVED — Leave Request</b>\n\n${escapeHtml(record.employee)}, your ${escapeHtml(record.type)} leave from ${escapeHtml(record.from_fmt)} to ${escapeHtml(record.to_fmt)} has been approved.\n\n— Jen, Psulit Money Changer`;
-  } else if (decision === 'declined') {
-    memo = `❌ <b>NOT APPROVED — Leave Request</b>\n\n${escapeHtml(record.employee)}, your ${escapeHtml(record.type)} leave request for ${escapeHtml(record.from_fmt)} to ${escapeHtml(record.to_fmt)} was not approved at this time.\n\nMessage Jen directly if you'd like to discuss.\n\n— Jen, Psulit Money Changer`;
-  } else {
-    memo = `📋 <b>Update on your Leave Request</b>\n\n${escapeHtml(record.employee)}, regarding your ${escapeHtml(record.type)} leave (${escapeHtml(record.from_fmt)} to ${escapeHtml(record.to_fmt)}):\n\n${escapeHtml(customText || '')}\n\n— Jen, Psulit Money Changer`;
+  if (decision === 'custom') {
+    if (record.employee_chat_id) {
+      await sendMessage(record.employee_chat_id,
+        `📋 <b>Update on your Leave Request</b>\n\n${escapeHtml(record.employee)}, regarding your ${escapeHtml(record.type)} leave (${escapeHtml(record.from_fmt)} to ${escapeHtml(record.to_fmt)}):\n\n${escapeHtml(customText || '')}\n\n— Jen, Psulit Money Changer`);
+    }
+    return { ok: true, custom: true };
   }
+
+  if (decision !== 'approved' && decision !== 'declined') {
+    throw new Error('Invalid leave decision');
+  }
+
+  const { data: claimed, error: claimError } = await supabase
+    .from('leave_requests')
+    .update({ status: decision, approved_by: 'Jen', decided_at: new Date().toISOString() })
+    .eq('request_id', requestId)
+    .eq('status', 'pending')
+    .select('*')
+    .limit(1);
+
+  if (claimError) throw claimError;
+  if (!claimed || !claimed.length) return { ok: false, alreadyProcessed: true };
+  record = claimed[0];
+
+  const memo = decision === 'approved'
+    ? `✅ <b>APPROVED — Leave Request</b>\n\n${escapeHtml(record.employee)}, your ${escapeHtml(record.type)} leave from ${escapeHtml(record.from_fmt)} to ${escapeHtml(record.to_fmt)} has been approved.\n\n— Jen, Psulit Money Changer`
+    : `❌ <b>NOT APPROVED — Leave Request</b>\n\n${escapeHtml(record.employee)}, your ${escapeHtml(record.type)} leave request for ${escapeHtml(record.from_fmt)} to ${escapeHtml(record.to_fmt)} was not approved at this time.\n\nMessage Jen directly if you'd like to discuss.\n\n— Jen, Psulit Money Changer`;
 
   if (record.employee_chat_id) {
     await sendMessage(record.employee_chat_id, memo);
-    await sendMessage(JEN_CHAT_ID, `✅ Sent to ${record.employee}.`);
   } else {
-    await sendMessage(JEN_CHAT_ID, `⚠️ No Telegram chat ID on file for ${record.employee} — couldn't auto-send. Please message them directly.`);
+    await sendMessage(JEN_CHAT_ID, `⚠️ No Telegram chat ID on file for ${escapeHtml(record.employee)} — couldn't auto-send the decision.`);
   }
 
-  const coverTag = record.cover_by_chat_id
-    ? `<a href="tg://user?id=${record.cover_by_chat_id}">${escapeHtml(record.cover_by)}</a>`
-    : escapeHtml(record.cover_by || '');
-
-  const groupLine = decision === 'approved'
-    ? `✅ ${record.employee}'s ${record.type} leave (${record.from_fmt} – ${record.to_fmt}) — Approved\n\nShift covered by: ${coverTag}\n\n${ATTENDANCE_TAG}, please adjust schedule accordingly. Thank you!`
-    : decision === 'declined'
-      ? `❌ ${record.employee}'s ${record.type} leave (${record.from_fmt} – ${record.to_fmt}) — Not approved`
-      : `📋 Update posted on ${record.employee}'s ${record.type} leave request (${record.from_fmt} – ${record.to_fmt})`;
-  await sendMessage(GROUP_CHAT_ID, groupLine);
-
+  // Only approved requests are published to the staff group, payroll, and sheet.
   if (decision === 'approved') {
-    // Write into Payroll's leave_records — this is what deducts the credit,
-    // since Payroll computes remaining balances by summing these rows.
+    const coverTag = record.cover_by_chat_id
+      ? `<a href="tg://user?id=${record.cover_by_chat_id}">${escapeHtml(record.cover_by)}</a>`
+      : escapeHtml(record.cover_by || 'TBD');
+    const groupLine = `✅ <b>${escapeHtml(record.employee)}'s ${escapeHtml(record.type)} leave APPROVED</b>\n\n${escapeHtml(record.from_fmt)} – ${escapeHtml(record.to_fmt)} (${escapeHtml(record.day_count || '')} day/s)\nBranch: ${escapeHtml(record.branch)}\nShift covered by: ${coverTag}\n\n${ATTENDANCE_TAG}, please adjust the schedule accordingly. Thank you!`;
+    await sendMessage(GROUP_CHAT_ID, groupLine);
+
     await recordLeaveInPayroll(record);
 
     const jazelleMemo = `📋 <b>Schedule Adjustment Needed</b>\n\n${escapeHtml(record.employee)}'s ${escapeHtml(record.type)} leave (${escapeHtml(record.branch)}) was just approved:\n\n${escapeHtml(record.from_fmt)} – ${escapeHtml(record.to_fmt)}\n\nShift covered by: ${escapeHtml(record.cover_by || 'TBD')}\n\nPlease adjust the schedule accordingly.\n\n— Jen`;
@@ -165,18 +178,18 @@ async function resolveRequest(requestId, record, decision, customText) {
       const coverMemo = `📋 <b>Shift Coverage — ${escapeHtml(record.branch)}</b>\n\nYou're covering for ${escapeHtml(record.employee)} while they're on ${escapeHtml(record.type)} leave:\n\n${escapeHtml(record.from_fmt)} – ${escapeHtml(record.to_fmt)}\n\nThanks for covering!\n\n— Jen, Psulit Money Changer`;
       await sendMessage(record.cover_by_chat_id, coverMemo);
     } else if (record.cover_by) {
-      await sendMessage(JEN_CHAT_ID, `⚠️ No Telegram chat ID on file for ${record.cover_by} (covering shift) — couldn't auto-send. Please notify them directly.`);
+      await sendMessage(JEN_CHAT_ID, `⚠️ No Telegram chat ID on file for ${escapeHtml(record.cover_by)} (covering shift) — please notify them directly.`);
+    }
+
+    try {
+      await syncLeaveRequestToGoogleSheet(record, 'approved');
+    } catch (sheetErr) {
+      console.error('Google Sheets leave ledger sync failed:', sheetErr);
+      await sendMessage(JEN_CHAT_ID, `⚠️ ${escapeHtml(record.employee)}'s leave was approved and posted, but Google Sheets LEAVE LEDGER sync failed. Please check the ledger connection.`);
     }
   }
 
-  await supabase.from('leave_requests').update({ status: decision }).eq('request_id', requestId);
-
-  try {
-    await syncLeaveRequestToGoogleSheet(record, decision);
-  } catch (sheetErr) {
-    console.error('Google Sheets leave ledger sync failed:', sheetErr);
-    await sendMessage(JEN_CHAT_ID, `⚠️ Leave status was updated in Telegram/database, but Google Sheets LEAVE LEDGER sync failed for ${escapeHtml(record.employee)}. Please check the ledger connection.`);
-  }
+  return { ok: true, status: decision };
 }
 
 // Writes an approved leave into Payroll's leave_records table.
