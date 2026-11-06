@@ -29,3 +29,8 @@ create index if not exists idx_leave_requests_status on leave_requests (status);
 -- No RLS policies needed: the backend functions use the secret key,
 -- which bypasses Row Level Security entirely. RLS stays off by default
 -- for this table, which is fine since nothing public-facing reads it directly.
+
+
+-- Approval audit fields (safe to run on an existing leave_requests table).
+alter table leave_requests add column if not exists approved_by text;
+alter table leave_requests add column if not exists decided_at timestamptz;

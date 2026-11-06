@@ -391,13 +391,13 @@
     </form>
   </div>
 
-  <div class="footer-note">Routed to Jen &amp; Psulit Leave Requests &amp; Approvals on Telegram</div>
+  <div class="footer-note">Submitted privately to Jen for approval</div>
 </div>
 
 <div class="stamp-wrap" id="stampWrap">
   <div class="stamp-card">
     <div class="stamp" id="stampEl">SUBMITTED</div>
-    <p id="stampMsg">Your leave slip has been sent to Jen and the approvals group.</p>
+    <p id="stampMsg">Your leave request has been submitted to Jen for approval. You will be notified once a decision is made.</p>
     <button id="stampClose">Done</button>
   </div>
 </div>
@@ -860,7 +860,7 @@
     if(ok){
       stamp.textContent = 'SUBMITTED';
       stamp.classList.remove('error-stamp');
-      msg.textContent = 'Your leave slip has been sent to Jen and the approvals group.';
+      msg.textContent = 'Your leave request has been submitted to Jen for approval. You will be notified once a decision is made.';
     } else {
       stamp.textContent = 'NOT SENT';
       stamp.classList.add('error-stamp');
