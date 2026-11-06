@@ -1,7 +1,7 @@
 {
   "name": "psulit-leave-request",
-  "version": "1.0.0",
-  "description": "Psulit Leave Request — Netlify site (form + serverless functions)",
+  "version": "2.1.0",
+  "description": "Psulit Leave Request — Google Sheets-backed approval workflow with existing Payroll sync",
   "private": true,
   "dependencies": {
     "@supabase/supabase-js": "^2.45.0",
