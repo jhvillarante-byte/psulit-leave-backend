@@ -117,7 +117,12 @@ async function resolveRequest(requestId, record, decision, customText) {
       ? `<a href="tg://user?id=${record.cover_by_chat_id}">${escapeHtml(record.cover_by)}</a>`
       : escapeHtml(record.cover_by || 'TBD');
     const groupLine = `✅ <b>${escapeHtml(record.employee)}'s ${escapeHtml(record.type)} leave APPROVED</b>\n\n${escapeHtml(record.from_fmt)} – ${escapeHtml(record.to_fmt)} (${escapeHtml(record.day_count || '')} day/s)\nBranch: ${escapeHtml(record.branch)}\nShift covered by: ${coverTag}\n\n${ATTENDANCE_TAG}, please adjust the schedule accordingly. Thank you!`;
-    await sendMessage(GROUP_CHAT_ID, groupLine);
+    const groupResult = await sendMessage(GROUP_CHAT_ID, groupLine);
+    if (!groupResult || groupResult.ok !== true) {
+      console.error('Staff group announcement failed:', groupResult);
+      await sendMessage(JEN_CHAT_ID,
+        `⚠️ Leave approved for ${escapeHtml(record.employee)}, but the staff group announcement failed. Telegram response: ${escapeHtml(groupResult && groupResult.description || 'No response')}. Please check that the bot is a member of the PSulit Leave Requests group and can send messages.`);
+    }
 
     await recordLeaveInPayroll(record);
 
