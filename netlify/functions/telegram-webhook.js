@@ -10,6 +10,12 @@ exports.handler = async (event) => {
     // --- Button tap ---
     if (update.callback_query) {
       const cq = update.callback_query;
+      // Only Jen's private approver chat is authorized to approve/decline.
+      if (!cq.message || String(cq.message.chat.id) !== String(JEN_CHAT_ID)) {
+        await answerCallback(cq.id, 'Only the designated approver can decide this request.');
+        return { statusCode: 200, body: 'ok' };
+      }
+
       const data = cq.data || '';
       const [action, requestId] = data.split(':');
 
@@ -25,14 +31,14 @@ exports.handler = async (event) => {
         .limit(1);
       const record = rows && rows[0];
 
-      if (!record || record.status !== 'pending') {
+      if (!record || record.status !== 'pending' || Number(record.jen_message_id) !== Number(cq.message.message_id)) {
         await answerCallback(cq.id, 'This request is no longer pending.');
         return { statusCode: 200, body: 'ok' };
       }
 
       const decision = action === 'appr' ? 'approved' : 'declined';
-      await resolveRequest(requestId, record, decision);
-      await answerCallback(cq.id, decision === 'approved' ? 'Approved ✅' : 'Declined ❌');
+      const result = await resolveRequest(requestId, record, decision);
+      await answerCallback(cq.id, result && result.alreadyProcessed ? 'This request was already processed.' : (decision === 'approved' ? 'Approved ✅' : 'Declined ❌'));
 
       const decisionLine = decision === 'approved' ? '\n\n✅ <b>APPROVED</b>' : '\n\n❌ <b>DECLINED</b>';
       const typeEmoji = { Sick: '🤒', Vacation: '🌴', 'Emergency/Other': '⚠️' }[record.type] || '📋';

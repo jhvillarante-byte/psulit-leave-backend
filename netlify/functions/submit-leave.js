@@ -45,19 +45,12 @@ exports.handler = async (event) => {
       ]]
     };
 
-    const jenResult = await sendPhoto(JEN_CHAT_ID, photoBuffer, caption, approveButtons);
-    await sendPhoto(GROUP_CHAT_ID, photoBuffer, caption);
-
-    if (!jenResult.ok) {
-      console.error('Failed to send to Jen:', jenResult);
-      return { statusCode: 502, body: JSON.stringify({ ok: false, error: 'Telegram send failed' }) };
-    }
-
-    const jenMessageId = jenResult.result.message_id;
+    // Create the pending database record before notifying Jen, so an immediate
+    // button tap can always find the request. Pending requests stay private.
     const employeeChatId = EMPLOYEE_CHAT_IDS[employee] || null;
     const coverByChatId = EMPLOYEE_CHAT_IDS[coverBy] || null;
 
-    const { error } = await supabase.from('leave_requests').insert({
+    const { error: insertError } = await supabase.from('leave_requests').insert({
       request_id: requestId,
       employee, cover_by: coverBy || null, cover_by_chat_id: coverByChatId,
       branch, type, from_fmt: fromFmt, to_fmt: toFmt,
@@ -65,29 +58,27 @@ exports.handler = async (event) => {
       day_count: dayCount, hours_requested: hoursRequested ? Number(hoursRequested) : null,
       reason, contact, slip_no: slipNo,
       employee_chat_id: employeeChatId,
-      jen_message_id: jenMessageId,
       status: 'pending'
     });
 
-    if (error) {
-      console.error('Supabase insert error:', error);
+    if (insertError) {
+      console.error('Supabase insert error:', insertError);
       return { statusCode: 500, body: JSON.stringify({ ok: false, error: 'Database error' }) };
     }
 
-    try {
-      await require('./_lib/shared').syncLeaveRequestToGoogleSheet({
-        request_id: requestId,
-        employee, cover_by: coverBy || '',
-        branch, type, from_fmt: fromFmt, to_fmt: toFmt,
-        date_from: dateFrom || '', date_to: dateTo || '',
-        day_count: dayCount, hours_requested: hoursRequested ? Number(hoursRequested) : '',
-        reason, contact, slip_no: slipNo, status: 'pending',
-        created_at: new Date().toISOString()
-      }, 'pending');
-    } catch (sheetErr) {
-      console.error('Google Sheets leave ledger sync failed:', sheetErr);
-      await require('./_lib/shared').sendMessage(JEN_CHAT_ID, '⚠️ Leave request was sent to Telegram, but Google Sheets LEAVE LEDGER sync failed. Please check the ledger connection.');
+    const jenResult = await sendPhoto(JEN_CHAT_ID, photoBuffer, caption, approveButtons);
+    if (!jenResult.ok) {
+      console.error('Failed to send to Jen:', jenResult);
+      await supabase.from('leave_requests').update({ status: 'notification_failed' }).eq('request_id', requestId);
+      return { statusCode: 502, body: JSON.stringify({ ok: false, error: 'Telegram send failed' }) };
     }
+
+    await supabase.from('leave_requests')
+      .update({ jen_message_id: jenResult.result.message_id })
+      .eq('request_id', requestId);
+
+    // No Google Sheets write or staff-group post here: only approved requests
+    // are entered in the leave ledger and announced to the group.
 
     return { statusCode: 200, body: JSON.stringify({ ok: true }) };
   } catch (err) {
