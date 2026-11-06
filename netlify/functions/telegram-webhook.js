@@ -6,6 +6,18 @@ const {
 exports.handler = async (event) => {
   try {
     const update = JSON.parse(event.body || '{}');
+
+    // Temporary admin diagnostic: ask the bot for the numeric ID of its group.
+    // The command is answered privately to Jen and does not affect leave decisions.
+    const incomingMessage = update.message;
+    if (incomingMessage && incomingMessage.chat &&
+        ['group', 'supergroup'].includes(incomingMessage.chat.type) &&
+        /^\/groupid(?:@\w+)?$/i.test((incomingMessage.text || '').trim())) {
+      const { sendMessage } = require('./_lib/shared');
+      await sendMessage(JEN_CHAT_ID,
+        `PSulit Leave Requests group ID: <code>${incomingMessage.chat.id}</code>`);
+      return { statusCode: 200, body: 'ok' };
+    }
     if (update.callback_query) {
       const cq = update.callback_query;
       if (!cq.message || String(cq.message.chat.id) !== String(JEN_CHAT_ID)) {
