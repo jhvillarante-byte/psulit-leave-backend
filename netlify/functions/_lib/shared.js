@@ -1,17 +1,7 @@
-const { createClient } = require('@supabase/supabase-js');
-
 const BOT_TOKEN = process.env.BOT_TOKEN;
 const JEN_CHAT_ID = process.env.JEN_CHAT_ID || '1761414251';
 const GROUP_CHAT_ID = process.env.GROUP_CHAT_ID || '-5459473400';
 const TELEGRAM_API = `https://api.telegram.org/bot${BOT_TOKEN}`;
-
-// Supabase is no longer used to store leave requests. This optional connection
-// is ONLY to the existing Payroll project, where approved leave deductions are recorded.
-const PAYROLL_SUPABASE_URL = process.env.PAYROLL_SUPABASE_URL;
-const PAYROLL_SUPABASE_SECRET_KEY = process.env.PAYROLL_SUPABASE_SECRET_KEY;
-const payrollSupabase = (PAYROLL_SUPABASE_URL && PAYROLL_SUPABASE_SECRET_KEY)
-  ? createClient(PAYROLL_SUPABASE_URL, PAYROLL_SUPABASE_SECRET_KEY)
-  : null;
 
 const EMPLOYEE_CHAT_IDS = {
   'Jazelle Espiritu': '6196732232',
@@ -124,7 +114,6 @@ async function resolveRequest(requestId, record, decision, customText) {
         `⚠️ Leave approved for ${escapeHtml(record.employee)}, but the staff group announcement failed. Telegram response: ${escapeHtml(groupResult && groupResult.description || 'No response')}. Please check that the bot is a member of the PSulit Leave Requests group and can send messages.`);
     }
 
-    await recordLeaveInPayroll(record);
 
     const jazelleMemo = `📋 <b>Schedule Adjustment Needed</b>\n\n${escapeHtml(record.employee)}'s ${escapeHtml(record.type)} leave (${escapeHtml(record.branch)}) was just approved:\n\n${escapeHtml(record.from_fmt)} – ${escapeHtml(record.to_fmt)}\n\nShift covered by: ${escapeHtml(record.cover_by || 'TBD')}\n\nPlease adjust the schedule accordingly.\n\n— Jen`;
     await sendMessage(JAZELLE_CHAT_ID, jazelleMemo);
@@ -138,33 +127,7 @@ async function resolveRequest(requestId, record, decision, customText) {
   return { ok: true, status: decision };
 }
 
-// Keep the existing Payroll integration only. This does not store leave requests.
-async function recordLeaveInPayroll(record) {
-  if (!payrollSupabase) {
-    console.error('Payroll Supabase is not configured; leave request itself remains safely stored in Google Sheets.');
-    await sendMessage(JEN_CHAT_ID, `⚠️ ${escapeHtml(record.employee)}'s leave was approved, but the payroll database connection is not configured. Please check the payroll deduction.`);
-    return;
-  }
-  const isOffset = record.type === 'Offset Request';
-  const hours = record.hours_requested ? Number(record.hours_requested) : null;
-  const row = {
-    employee_name: record.employee,
-    leave_type: record.type,
-    date_from: record.date_from || null,
-    date_to: record.date_to || null,
-    day_count: isOffset ? 0 : Number(record.day_count || 0),
-    branch: record.branch,
-    reason: record.reason,
-    status: 'approved',
-    hours_requested: isOffset ? hours : null
-  };
-  const { error } = await payrollSupabase.from('leave_records').insert(row);
-  if (error) {
-    console.error('Payroll leave_records insert failed:', error);
-    await sendMessage(JEN_CHAT_ID, `⚠️ ${escapeHtml(record.employee)}'s leave was approved and saved to Google Sheets, but the payroll deduction write failed. Please check payroll before the next cutoff.`);
-  }
-}
-
+// Approved requests are written to the Google Sheets LEAVE ledger by Apps Script.\n
 module.exports = {
   BOT_TOKEN, JEN_CHAT_ID, GROUP_CHAT_ID, TELEGRAM_API,
   EMPLOYEE_CHAT_IDS, JAZELLE_CHAT_ID, ATTENDANCE_TAG,
