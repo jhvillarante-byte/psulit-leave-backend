@@ -127,11 +127,11 @@ async function resolveRequest(requestId, record, decision, customText) {
   return { ok: true, status: decision };
 }
 
-// Approved requests are written to the Google Sheets LEAVE ledger by Apps Script.\n
+// Approved requests are written to the Google Sheets LEAVE ledger by Apps Script.
 module.exports = {
   BOT_TOKEN, JEN_CHAT_ID, GROUP_CHAT_ID, TELEGRAM_API,
   EMPLOYEE_CHAT_IDS, JAZELLE_CHAT_ID, ATTENDANCE_TAG,
   escapeHtml, sendPhoto, sendMessage, editCaption, answerCallback,
   createPendingRequest, getRequestById, getPendingByMessageId, updateRequest,
-  resolveRequest, recordLeaveInPayroll
+  resolveRequest
 };
